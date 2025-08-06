@@ -1,5 +1,6 @@
 package com.nowgnodeel.todobe.todo.entity;
 
+import com.nowgnodeel.todobe.auth.entity.User;
 import com.nowgnodeel.todobe.todo.common.IsDone;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -14,10 +15,11 @@ import java.time.LocalDateTime;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
+@Table(name = "todo")
 public class Todo {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(nullable = false)
@@ -29,5 +31,11 @@ public class Todo {
     @Column(nullable = false)
     private LocalDateTime end;
 
+    @Column(nullable = false)
+    @Enumerated(EnumType.STRING)
     private IsDone isDone;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
 }

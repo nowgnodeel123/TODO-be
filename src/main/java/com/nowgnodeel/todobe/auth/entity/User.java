@@ -1,11 +1,15 @@
 package com.nowgnodeel.todobe.auth.entity;
 
 import com.nowgnodeel.todobe.auth.common.Gender;
+import com.nowgnodeel.todobe.todo.entity.Todo;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Getter
@@ -17,7 +21,6 @@ public class User {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(nullable = false)
     private Long id;
 
     @Column(nullable = false, unique = true)
@@ -38,4 +41,7 @@ public class User {
 
     @Column(nullable = false)
     private String phone;
+
+    @OneToMany(mappedBy = "user", cascade = CascadeType.REMOVE, orphanRemoval = true)
+    private List<Todo> todos = new ArrayList<>();
 }

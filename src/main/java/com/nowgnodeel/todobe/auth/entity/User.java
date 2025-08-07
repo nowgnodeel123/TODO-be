@@ -4,7 +4,6 @@ import com.nowgnodeel.todobe.auth.common.Gender;
 import com.nowgnodeel.todobe.global.entity.Timestamped;
 import com.nowgnodeel.todobe.todo.entity.Todo;
 import jakarta.persistence.*;
-import jdk.jfr.Timestamp;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;

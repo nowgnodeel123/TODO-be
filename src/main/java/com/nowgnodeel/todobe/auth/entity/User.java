@@ -1,8 +1,10 @@
 package com.nowgnodeel.todobe.auth.entity;
 
 import com.nowgnodeel.todobe.auth.common.Gender;
+import com.nowgnodeel.todobe.global.entity.Timestamped;
 import com.nowgnodeel.todobe.todo.entity.Todo;
 import jakarta.persistence.*;
+import jdk.jfr.Timestamp;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -17,7 +19,7 @@ import java.util.List;
 @AllArgsConstructor
 @NoArgsConstructor
 @Table(name = "users")
-public class User {
+public class User extends Timestamped {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

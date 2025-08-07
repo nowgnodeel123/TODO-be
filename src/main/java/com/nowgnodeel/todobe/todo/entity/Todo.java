@@ -1,6 +1,7 @@
 package com.nowgnodeel.todobe.todo.entity;
 
 import com.nowgnodeel.todobe.auth.entity.User;
+import com.nowgnodeel.todobe.global.entity.Timestamped;
 import com.nowgnodeel.todobe.todo.common.IsDone;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -16,7 +17,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Table(name = "todo")
-public class Todo {
+public class Todo extends Timestamped {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

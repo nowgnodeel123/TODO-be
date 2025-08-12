@@ -1,4 +1,4 @@
-package com.nowgnodeel.todobe.user.common;
+package com.nowgnodeel.todobe.auth.common;
 
 public enum Gender {
     MALE, FEMALE, NONE

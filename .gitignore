@@ -35,3 +35,32 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### OS junk ###
+.DS_Store
+Thumbs.db
+
+### Logs ###
+*.log
+logs/
+**/logs/
+
+### Spring Boot config & secrets ###
+**/src/main/resources/application.yaml
+**/src/main/resources/application-*.yaml
+!**/src/main/resources/application-example.yaml
+.env
+.env.*
+*.pem
+*.key
+*.jks
+*.p12
+*.keystore
+*.crt
+*.cer
+*.der
+
+### Local databases ###
+*.sqlite
+*.db
+*.h2.db

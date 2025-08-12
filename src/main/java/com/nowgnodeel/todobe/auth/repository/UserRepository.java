@@ -1,12 +1,12 @@
-package com.nowgnodeel.todobe.user.repository;
+package com.nowgnodeel.todobe.auth.repository;
 
-import com.nowgnodeel.todobe.user.entity.User;
+import com.nowgnodeel.todobe.auth.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 
-@Repository
 public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByUsername(String username);
+
+    boolean existsByUsername(String username);
 }

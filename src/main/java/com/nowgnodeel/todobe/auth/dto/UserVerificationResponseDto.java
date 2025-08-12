@@ -1,4 +1,4 @@
-package com.nowgnodeel.todobe.auth.dto.response;
+package com.nowgnodeel.todobe.auth.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

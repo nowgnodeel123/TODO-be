@@ -1,39 +1,53 @@
 package com.nowgnodeel.todobe.auth.config.security;
 
-import com.nowgnodeel.todobe.auth.repository.UserRepository;
-import com.nowgnodeel.todobe.auth.common.Role; // ← 네가 가진 enum 경로
+import com.nowgnodeel.todobe.auth.entity.User;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-@Service
+import java.util.Collection;
+import java.util.List;
+
+@Getter
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
-public class CustomUserDetailsService implements UserDetailsService {
+public class UserDetailsImpl implements UserDetails {
 
-    private final UserRepository userRepository;
+    private final User user;
 
     @Override
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        var user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new UsernameNotFoundException("해당하는 회원을 찾을 수 없습니다."));
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()));
+    }
 
-        var authorities = user.getRoles().stream()
-                .map(Role::name)
-                .map(r -> "ROLE_" + r)
-                .distinct()
-                .map(SimpleGrantedAuthority::new)
-                .toList();
+    @Override
+    public String getPassword() {
+        return user.getPassword();
+    }
 
-        return User
-                .withUsername(user.getUsername())
-                .password(user.getPassword())
-                .authorities(authorities)
-                .build();
+    @Override
+    public String getUsername() {
+        return user.getUsername();
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
     }
 }

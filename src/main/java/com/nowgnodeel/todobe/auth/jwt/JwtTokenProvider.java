@@ -1,155 +1,140 @@
-package com.nowgnodeel.todobe.auth.security.jwt;
+package com.nowgnodeel.todobe.auth.jwt;
 
-import io.jsonwebtoken.*;
+import com.nowgnodeel.todobe.auth.config.security.UserDetailsServiceImpl;
+import com.nowgnodeel.todobe.auth.dto.JwsDto;
+import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.MalformedJwtException;
+import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
-import java.security.Key;
-import java.util.*;
-import java.util.stream.Collectors;
+import javax.crypto.SecretKey;
+import java.util.Date;
 
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class JwtTokenProvider {
 
-    private static final long ACCESS_TOKEN_TTL = 30 * 60 * 1000L;
-    private static final long REFRESH_TOKEN_TTL = 7L * 24 * 60 * 60 * 1000;
-    private static final long CLOCK_SKEW_SECONDS = 30L;
-    private static final String ISSUER = "off";
+    private final UserDetailsServiceImpl userDetailsService;
 
-    private static final String CLAIM_AUTH = "auth";
-    private static final String CLAIM_TOKEN_TYPE = "token_type";
-    private static final String TOKEN_TYPE_ACCESS = "access";
-    private static final String TOKEN_TYPE_REFRESH = "refresh";
+    public static final String ACCESS_TOKEN = "Authorization";
+    public static final String REFRESH_TOKEN = "Refresh";
+    private static final String BEARER_PREFIX = "Bearer ";
 
-    private final Key key;
+    @Value("${jwt.secret.key}")
+    private String secretKeyBase64;
 
-    public JwtTokenProvider(@Value("${jwt.secret}") String secret) {
-        byte[] keyBytes = Decoders.BASE64.decode(secret);
-        if (keyBytes.length < 32)
-            throw new IllegalArgumentException("jwt.secret must be Base64-encoded 256-bit key or larger");
-        this.key = Keys.hmacShaKeyFor(keyBytes);
+    @Value("${jwt.issuer:nowgnodeel}")
+    private String issuer;
+
+    @Value("${jwt.accessMillis:3600000}")
+    private long accessValidityMs;
+
+    @Value("${jwt.refreshMillis:604800000}")
+    private long refreshValidityMs;
+
+    private SecretKey key;
+
+    @PostConstruct
+    public void init() {
+        byte[] bytes = Decoders.BASE64.decode(secretKeyBase64);
+        if (bytes.length < 32) {
+            throw new IllegalStateException("JWT secret too short (>=32 bytes after Base64).");
+        }
+        key = Keys.hmacShaKeyFor(bytes);
+        log.info("JWT key initialized. issuer={}, accessValidityMs={}, refreshValidityMs={}", issuer, accessValidityMs, refreshValidityMs);
     }
 
-    public JwtToken generateToken(Authentication authentication) {
-        long now = System.currentTimeMillis();
-        Date iat = new Date(now);
+    public String getToken(HttpServletRequest request, String jwsType) {
+        String headerName = ACCESS_TOKEN.equals(jwsType) ? ACCESS_TOKEN : REFRESH_TOKEN;
+        String headerVal = request.getHeader(headerName);
+        if (!StringUtils.hasText(headerVal)) return null;
+        return stripBearer(headerVal);
+    }
 
-        String authorities = authentication.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
-                .collect(Collectors.joining(","));
-        String subject = authentication.getName();
+    public String createAccessToken(String username) {
+        return formatAsBearer(createToken(username, accessValidityMs));
+    }
 
-        String accessToken = Jwts.builder()
-                .setHeaderParam(Header.TYPE, Header.JWT_TYPE)
-                .setIssuer(ISSUER)
-                .setSubject(subject)
-                .claim(CLAIM_AUTH, authorities)
-                .claim(CLAIM_TOKEN_TYPE, TOKEN_TYPE_ACCESS)
-                .setId(UUID.randomUUID().toString())
-                .setIssuedAt(iat)
-                .setExpiration(new Date(now + ACCESS_TOKEN_TTL))
-                .signWith(key, SignatureAlgorithm.HS256)
-                .compact();
+    public String createRefreshToken(String username) {
+        return formatAsBearer(createToken(username, refreshValidityMs));
+    }
 
-        String refreshToken = Jwts.builder()
-                .setHeaderParam(Header.TYPE, Header.JWT_TYPE)
-                .setIssuer(ISSUER)
-                .setSubject(subject)
-                .claim(CLAIM_TOKEN_TYPE, TOKEN_TYPE_REFRESH)
-                .setId(UUID.randomUUID().toString())
-                .setIssuedAt(iat)
-                .setExpiration(new Date(now + REFRESH_TOKEN_TTL))
-                .signWith(key, SignatureAlgorithm.HS256)
-                .compact();
-
-        return JwtToken.builder()
-                .grantType("Bearer")
-                .accessToken(accessToken)
-                .refreshToken(refreshToken)
+    public JwsDto createAllTokens(String userId) {
+        return JwsDto.builder()
+                .accessToken(createAccessToken(userId))
+                .refreshToken(createRefreshToken(userId))
                 .build();
     }
 
-    public Optional<Authentication> validateAccessTokenAndGetAuthentication(String token) {
+    public boolean validateToken(String tokenOrHeaderValue) {
+        String jws = stripBearer(tokenOrHeaderValue);
         try {
-            Jws<Claims> jws = Jwts.parserBuilder()
-                    .setSigningKey(key)
-                    .requireIssuer(ISSUER)
-                    .setAllowedClockSkewSeconds(CLOCK_SKEW_SECONDS)
-                    .build()
-                    .parseClaimsJws(token);
-
-            String alg = jws.getHeader().getAlgorithm();
-            if (!SignatureAlgorithm.HS256.getValue().equals(alg)) return Optional.empty();
-
-            Claims claims = jws.getBody();
-            if (!TOKEN_TYPE_ACCESS.equals(claims.get(CLAIM_TOKEN_TYPE, String.class))) return Optional.empty();
-
-            String authClaim = claims.get(CLAIM_AUTH, String.class);
-            if (authClaim == null || authClaim.isBlank()) return Optional.empty();
-
-            var authorities = Arrays.stream(authClaim.split(","))
-                    .map(String::trim)
-                    .filter(s -> !s.isEmpty())
-                    .distinct()
-                    .map(SimpleGrantedAuthority::new)
-                    .collect(Collectors.toList());
-
-            String username = claims.getSubject();
-            UserDetails principal = User.withUsername(username).password("").authorities(authorities).build();
-
-            return Optional.of(new UsernamePasswordAuthenticationToken(principal, null, authorities));
-        } catch (JwtException | IllegalArgumentException e) {
-            return Optional.empty();
-        }
-    }
-
-    public boolean isRefreshToken(String token) {
-        try {
-            Claims claims = parseClaimsStrict(token);
-            return TOKEN_TYPE_REFRESH.equals(claims.get(CLAIM_TOKEN_TYPE, String.class));
-        } catch (BadCredentialsException e) {
-            return false;
-        }
-    }
-
-    public Claims parseClaimsAllowExpired(String token) {
-        try {
-            return Jwts.parserBuilder()
-                    .setSigningKey(key)
-                    .requireIssuer(ISSUER)
-                    .setAllowedClockSkewSeconds(CLOCK_SKEW_SECONDS)
-                    .build()
-                    .parseClaimsJws(token)
-                    .getBody();
+            Jwts.parser().verifyWith(key).build().parseSignedClaims(jws);
+            return true;
+        } catch (io.jsonwebtoken.security.SecurityException | MalformedJwtException e) {
+            log.info("Invalid JWT signature/format: {}", e.getClass().getSimpleName());
         } catch (ExpiredJwtException e) {
-            return e.getClaims();
+            log.info("Expired JWT token");
+        } catch (UnsupportedJwtException e) {
+            log.info("Unsupported JWT token");
+        } catch (IllegalArgumentException e) {
+            log.info("JWT claims is empty");
+        }
+        return false;
+    }
+
+    public String getUserInfo(String tokenOrHeaderValue) {
+        String jws = stripBearer(tokenOrHeaderValue);
+        try {
+            return Jwts.parser().verifyWith(key).build().parseSignedClaims(jws).getPayload().getSubject();
+        } catch (ExpiredJwtException e) {
+            log.info("Expired JWT token, returning subject from claims.");
+            return e.getClaims().getSubject();
         }
     }
 
-    private Claims parseClaimsStrict(String token) {
-        try {
-            return Jwts.parserBuilder()
-                    .setSigningKey(key)
-                    .requireIssuer(ISSUER)
-                    .setAllowedClockSkewSeconds(CLOCK_SKEW_SECONDS)
-                    .build()
-                    .parseClaimsJws(token)
-                    .getBody();
-        } catch (ExpiredJwtException e) {
-            throw new BadCredentialsException("만료된 토큰입니다.", e);
-        } catch (JwtException | IllegalArgumentException e) {
-            throw new BadCredentialsException("유효하지 않은 JWT입니다.", e);
-        }
+    public Authentication getAuthentication(String username) {
+        UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+        return new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+    }
+
+    public void setHeaderAccessToken(HttpServletResponse response, String tokenOrHeaderValue) {
+        response.setHeader(ACCESS_TOKEN, formatAsBearer(stripBearer(tokenOrHeaderValue)));
+    }
+
+    private String createToken(String subject, long validityMs) {
+        long now = System.currentTimeMillis();
+        return Jwts.builder()
+                .subject(subject)
+                .issuer(issuer)
+                .issuedAt(new Date(now))
+                .expiration(new Date(now + validityMs))
+                .signWith(key)
+                .compact();
+    }
+
+    private String stripBearer(String maybeBearer) {
+        if (!StringUtils.hasText(maybeBearer)) return null;
+        String trimmed = maybeBearer.trim();
+        return trimmed.startsWith(BEARER_PREFIX) ? trimmed.substring(BEARER_PREFIX.length()).trim() : trimmed;
+    }
+
+    private String formatAsBearer(String rawToken) {
+        if (!StringUtils.hasText(rawToken)) return rawToken;
+        return rawToken.startsWith(BEARER_PREFIX) ? rawToken : BEARER_PREFIX + rawToken;
     }
 }

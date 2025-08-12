@@ -1,83 +1,90 @@
-package com.nowgnodeel.todobe.auth.security.jwt;
+package com.nowgnodeel.todobe.auth.jwt;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nowgnodeel.todobe.auth.dto.validation.SecurityExceptionDto;
+import com.nowgnodeel.todobe.auth.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpHeaders;
-import org.springframework.lang.NonNull;
-import org.springframework.security.core.context.SecurityContext;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.util.StringUtils;
-import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Optional;
+
+import static com.nowgnodeel.todobe.auth.jwt.JwtTokenProvider.ACCESS_TOKEN;
+import static com.nowgnodeel.todobe.auth.jwt.JwtTokenProvider.REFRESH_TOKEN;
 
 @Slf4j
+@RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
-    private final boolean failFast;
-
-    public JwtAuthenticationFilter(JwtTokenProvider provider) {
-        this.jwtTokenProvider = provider;
-        this.failFast = false;
-    }
-
-    public JwtAuthenticationFilter(JwtTokenProvider provider, boolean failFast) {
-        this.jwtTokenProvider = provider;
-        this.failFast = failFast;
-    }
+    private final UserRepository userRepository;
 
     @Override
-    protected void doFilterInternal(
-            @NonNull HttpServletRequest request,
-            @NonNull HttpServletResponse response,
-            @NonNull FilterChain filterChain
-    ) throws ServletException, IOException {
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws ServletException, IOException {
 
-        String token = resolveToken(request);
+        String uri = request.getRequestURI();
+        String accessToken = jwtTokenProvider.getToken(request, ACCESS_TOKEN);
+        String refreshToken = jwtTokenProvider.getToken(request, REFRESH_TOKEN);
 
-        try {
-            if (StringUtils.hasText(token)) {
-                Optional.ofNullable(jwtTokenProvider.validateAccessTokenAndGetAuthentication(token))
-                        .flatMap(a -> a)
-                        .ifPresentOrElse(auth -> {
-                            SecurityContext context = SecurityContextHolder.createEmptyContext();
-                            context.setAuthentication(auth);
-                            SecurityContextHolder.setContext(context);
-                        }, () -> {
-                            SecurityContextHolder.clearContext();
-                            if (failFast) {
-                                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                            }
-                        });
-                if (failFast && response.getStatus() == HttpServletResponse.SC_UNAUTHORIZED) return;
-            } else {
-                SecurityContextHolder.clearContext();
+        if ("/api/v1/reissue".equals(uri)) {
+            if (!StringUtils.hasText(refreshToken) || !jwtTokenProvider.validateToken(refreshToken)) {
+                writeError(response, "Invalid or missing refresh token.", HttpStatus.UNAUTHORIZED.value());
+                return;
             }
+            String usernameFromRefresh = jwtTokenProvider.getUserInfo(refreshToken);
+            if (!StringUtils.hasText(usernameFromRefresh)) {
+                writeError(response, "Cannot extract subject from refresh token.", HttpStatus.UNAUTHORIZED.value());
+                return;
+            }
+            if (StringUtils.hasText(accessToken)) {
+                String usernameFromAccess = jwtTokenProvider.getUserInfo(accessToken);
+                if (StringUtils.hasText(usernameFromAccess) && !usernameFromRefresh.equals(usernameFromAccess)) {
+                    writeError(response, "Tokens belong to different users.", HttpStatus.UNAUTHORIZED.value());
+                    return;
+                }
+            }
+            userRepository.findByUsername(usernameFromRefresh).orElseThrow(() -> new IllegalArgumentException("User not found"));
+            String newAccess = jwtTokenProvider.createAccessToken(usernameFromRefresh);
+            response.setHeader(ACCESS_TOKEN, newAccess);
+            response.setStatus(HttpStatus.OK.value());
+            return;
+        }
+
+        if (StringUtils.hasText(accessToken)) {
+            if (jwtTokenProvider.validateToken(accessToken)) {
+                setAuthentication(jwtTokenProvider.getUserInfo(accessToken));
+            } else {
+                writeError(response, "Invalid Access Token.", HttpStatus.UNAUTHORIZED.value());
+                return;
+            }
+        }
+
+        chain.doFilter(request, response);
+    }
+
+    private void setAuthentication(String username) {
+        Authentication authentication = jwtTokenProvider.getAuthentication(username);
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+
+    private void writeError(HttpServletResponse response, String msg, int statusCode) {
+        response.setStatus(statusCode);
+        response.setContentType("application/json");
+        try {
+            String json = new ObjectMapper().writeValueAsString(SecurityExceptionDto.builder().statusCode(statusCode).msg(msg).build());
+            response.getWriter().write(json);
         } catch (Exception e) {
-            SecurityContextHolder.clearContext();
-            log.debug("JWT error: {}", e.getMessage());
+            log.error(e.getMessage());
         }
-
-        filterChain.doFilter(request, response);
-    }
-
-    private String resolveToken(HttpServletRequest request) {
-        String header = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (StringUtils.hasText(header) && header.startsWith("Bearer ")) {
-            return header.substring(7);
-        }
-        return null;
-    }
-
-    @Override
-    protected boolean shouldNotFilter(HttpServletRequest request) {
-        String p = request.getServletPath();
-        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) return true; // CORS preflight
-        return p.equals("/api/v1/users/sign-in") || p.equals("/api/v1/users/refresh");
     }
 }
